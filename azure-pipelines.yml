@@ -1,0 +1,158 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+  - stage: Build
+    displayName: Build Angular App and publish artifacts
+    jobs:
+      - job: BuildAngularApp
+        displayName: Build Angular App
+        steps:
+        - task: NodeTool@0
+          inputs:
+            versionSpec: '10.x'
+          displayName: 'Install Node.js'
+
+        - script: |
+            npm install -g @angular/cli
+          displayName: 'Install the angular cli globally'
+
+        - task: Npm@1
+          inputs:
+            command: 'install'
+            workingDir: 'src/multistage-pipeline-demo'
+          displayName: 'Install angular app packages'
+
+        - task: Npm@1
+          displayName: 'Build Angular application'
+          inputs:
+            command: custom
+            customCommand: run build -- --prod
+            workingDir: src/multistage-pipeline-demo
+        
+        - task: ArchiveFiles@2
+          displayName: Zip Angular dist folder
+          inputs:
+            rootFolderOrFile: 'src/multistage-pipeline-demo/dist/multistage-pipeline-demo'
+            includeRootFolder: false
+            archiveType: 'zip'
+            archiveFile: '$(Build.ArtifactStagingDirectory)/multistage-pipeline-demo.zip'
+            replaceExistingArchive: true
+        
+        - task: PublishBuildArtifacts@1
+          displayName: Publish Angular app dist folder artifact
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)/multistage-pipeline-demo.zip'
+            ArtifactName: 'angular-app'
+            publishLocation: 'Container'
+
+      - job: PublishARMArtifacts
+        displayName: Publish ARM artifact
+        steps:
+        - task: PublishBuildArtifacts@1
+          inputs:
+            PathtoPublish: 'src/MultiStagePipeline/AzureResourceGroup.Infrastructure'
+            ArtifactName: 'arm-template'
+            publishLocation: 'Container'
+
+  - stage: DeployToDev
+    displayName: Deploy to Dev
+    dependsOn: Build
+    jobs:
+      - deployment: DeployARMAndWebApp
+        displayName: Deploy infrastructure and web app
+        environment: 'dev'
+        variables: 
+        - group: VariableGroup-dev
+        strategy:
+          runOnce:
+            preDeploy:
+              steps:
+              - download: current
+                artifact: angular-app
+                displayName: Download Angular artifact
+              - download: current
+                artifact: arm-template
+                displayName: Download ARM template artifact
+            deploy:
+              steps:
+              - task: AzureResourceManagerTemplateDeployment@3
+                displayName: Deploy ARM Template
+                inputs:
+                  deploymentScope: 'Resource Group'
+                  azureResourceManagerConnection: 'MultiStagePipeline-dev'
+                  subscriptionId: '38c15d6f-362a-4c30-9cd2-f1b3d8e1c38e'
+                  action: 'Create Or Update Resource Group'
+                  resourceGroupName: 'rg-multistage-pipeline-$(environment)'
+                  location: 'UK South'
+                  templateLocation: 'Linked artifact'
+                  csmFile: '$(Pipeline.Workspace)/arm-template/WebSite.json'
+                  overrideParameters: '-environment $(environment)'
+                  deploymentMode: 'Incremental'
+              - task: AzureRmWebAppDeployment@4
+                displayName: Deploy Angular App
+                inputs:
+                  ConnectionType: 'AzureRM'
+                  azureSubscription: 'MultiStagePipeline-dev'
+                  appType: 'webApp'
+                  WebAppName: 'app-multistagepipeline-$(environment)'
+                  packageForLinux: '$(Pipeline.Workspace)/angular-app/multistage-pipeline-demo.zip'
+
+    # Name changed from DeployToDev
+  - stage: DeployToQA
+    # Changed from Deploy to Dev
+    displayName: Deploy to QA
+    # Added to ensure this stage will not deploy until Dev has completed
+    dependsOn: DeployToDev
+    jobs:
+      - deployment: DeployARMAndWebApp
+        displayName: Deploy infrastructure and web app
+        # Changed Point to the qa environment
+        environment: 'qa'
+        variables: 
+        # Changed to use the QA variables
+        - group: VariableGroup-qa
+        strategy:
+          runOnce:
+            preDeploy:
+              steps:
+              - download: current
+                artifact: angular-app
+                displayName: Download Angular artifact
+              - download: current
+                artifact: arm-template
+                displayName: Download ARM template artifact
+            deploy:
+              steps:
+              - task: AzureResourceManagerTemplateDeployment@3
+                displayName: Deploy ARM Template
+                inputs:
+                  deploymentScope: 'Resource Group'
+                  # Changed to use the QA environment service connection
+                  azureResourceManagerConnection: 'MultiStagePipeline-qa'
+                  subscriptionId: '38c15d6f-362a-4c30-9cd2-f1b3d8e1c38e'
+                  action: 'Create Or Update Resource Group'
+                  resourceGroupName: 'rg-multistage-pipeline-$(environment)'
+                  location: 'UK South'
+                  templateLocation: 'Linked artifact'
+                  csmFile: '$(Pipeline.Workspace)/arm-template/WebSite.json'
+                  overrideParameters: '-environment $(environment)'
+                  deploymentMode: 'Incremental'
+              - task: AzureRmWebAppDeployment@4
+                displayName: Deploy Angular App
+                inputs:
+                  ConnectionType: 'AzureRM'
+                  # Changed to use the QA environment serivce connectio
+                  azureSubscription: 'MultiStagePipeline-qa'
+                  appType: 'webApp'
+                  WebAppName: 'app-multistagepipeline-$(environment)'
+                  packageForLinux: '$(Pipeline.Workspace)/angular-app/multistage-pipeline-demo.zip'
+              

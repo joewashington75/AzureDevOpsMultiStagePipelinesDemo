@@ -1,0 +1,2 @@
+# Introduction 
+This is an example solution demonstrating multi-stage builds using Azure DevOps YAML pipelines, ARM templates for infrastructure and an Angular application. The following article found [here](https://joeblogs.technology/2020/07/multi-stage-pipelines-and-yaml-for-continuous-delivery-azure-devops/) discusses the step by step process in more detail.
